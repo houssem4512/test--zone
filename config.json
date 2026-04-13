@@ -1,0 +1,27 @@
+{
+    "sequence_length": 64,
+    "camera_index": 0,
+    "min_hand_conf": 0.5,
+    "min_track_conf": 0.5,
+  
+    "start_vel_thresh": 0.015,
+    "end_vel_thresh": 0.008,
+    "start_consecutive": 3,
+    "end_consecutive": 8,
+    "max_stroke_frames": 120,
+  
+    "space_gap_frames": 35,
+  
+    "model": {
+      "hidden_size": 128,
+      "num_layers": 2,
+      "dropout": 0.3,
+      "lr": 0.001,
+      "batch_size": 64,
+      "epochs": 20
+    },
+  
+    "inference": {
+      "min_conf": 0.6
+    }
+  }
