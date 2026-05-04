@@ -9,9 +9,11 @@ from preprocess import normalize_landmarks, resample_sequence
 from segmentation import StrokeSegmenter
 from model import GRUClassifier
 
+
 def load_classes(classes_txt="classes.txt"):
     with open(classes_txt, "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
+
 
 def main():
     cfg = json.load(open("config.json", "r", encoding="utf-8"))
@@ -39,9 +41,11 @@ def main():
     model.to(device)
     model.eval()
 
+    # =========================
+    # ✅ FIXED HAND TRACKER
+    # =========================
     tracker = HandTracker(
-        min_hand_conf=cfg["min_hand_conf"],
-        min_track_conf=cfg["min_track_conf"]
+        model_path="models/hand_landmarker.task"
     )
 
     segmenter = StrokeSegmenter(
@@ -69,6 +73,7 @@ def main():
         ret, frame = cap.read()
         if not ret:
             break
+
         frame = cv2.flip(frame, 1)
 
         hand_landmarks = tracker.process(frame)
@@ -78,16 +83,17 @@ def main():
         event, payload = segmenter.update(lm21)
 
         if event == "stroke_end":
-            seq_landmarks = payload["seq_landmarks"]  # (T,21,3)
+            seq_landmarks = payload["seq_landmarks"]
 
             feats = []
             for t in range(seq_landmarks.shape[0]):
                 feats.append(normalize_landmarks(seq_landmarks[t]))
-            feats = np.stack(feats, axis=0)  # (T,63)
 
-            feats_rs = resample_sequence(feats, seq_len)  # (seq_len,63)
+            feats = np.stack(feats, axis=0)
+            feats_rs = resample_sequence(feats, seq_len)
 
-            x = torch.tensor(feats_rs[None, :, :], dtype=torch.float32).to(device)  # (1,T,F)
+            x = torch.tensor(feats_rs[None, :, :], dtype=torch.float32).to(device)
+
             with torch.no_grad():
                 logits = model(x)
                 probs = torch.softmax(logits, dim=1)[0]
@@ -95,36 +101,41 @@ def main():
 
             conf = float(conf.item())
             idx = int(idx.item())
+
             pred_char = classes_ckpt[idx]
             last_pred = pred_char
             last_conf = conf
 
             if conf >= cfg["inference"]["min_conf"]:
-                # auto-space: if gap was large since last stroke end
-                if segmenter.should_insert_space() and (len(typed_text) > 0) and (typed_text[-1] != " "):
+
+                if segmenter.should_insert_space() and len(typed_text) > 0 and typed_text[-1] != " ":
                     typed_text += " "
 
                 typed_text += pred_char
 
-        # --- Draw “phrase box” on frame ---
+        # =========================
+        # UI
+        # =========================
         h, w = frame.shape[:2]
         box_h = 110
+
         cv2.rectangle(frame, (0, h - box_h), (w, h), (15, 15, 15), -1)
         cv2.rectangle(frame, (10, h - box_h + 10), (w - 10, h - 10), (40, 40, 40), 2)
 
         cv2.putText(frame, "AIR WRITE:", (20, h - box_h + 40),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
         cv2.putText(frame, typed_text[-40:], (20, h - box_h + 85),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (220,255,220), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.75, (220, 255, 220), 2)
 
         cv2.putText(frame, f"Last: {last_pred} ({last_conf:.2f})",
                     (w - 380, h - box_h + 85),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200,200,255), 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 255), 1)
 
         cv2.imshow("AirWrite (phrase box) - press ESC to quit", frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == 27:  # ESC
+        if key == 27:
             break
         elif key == ord('c'):
             typed_text = ""
@@ -136,6 +147,7 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()

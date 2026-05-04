@@ -8,9 +8,11 @@ from hand_tracker import HandTracker
 from preprocess import normalize_landmarks, resample_sequence
 from segmentation import StrokeSegmenter
 
+
 def load_classes(classes_txt="classes.txt"):
     with open(classes_txt, "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -28,9 +30,11 @@ def main():
     device_root = os.path.join("data", "samples", args.label)
     os.makedirs(device_root, exist_ok=True)
 
+    # =========================
+    # ✅ FIXED PART (IMPORTANT)
+    # =========================
     tracker = HandTracker(
-        min_hand_conf=cfg["min_hand_conf"],
-        min_track_conf=cfg["min_track_conf"]
+        model_path="models/hand_landmarker.task"
     )
 
     segmenter = StrokeSegmenter(
@@ -57,47 +61,62 @@ def main():
         ret, frame = cap.read()
         if not ret:
             break
+
         frame = cv2.flip(frame, 1)
 
+        # =========================
+        # Hand tracking (NEW API)
+        # =========================
         hand_landmarks = tracker.process(frame)
         frame = tracker.draw(frame, hand_landmarks)
 
-        event, payload = segmenter.update(
-            tracker.landmarks_to_array(hand_landmarks) if hand_landmarks else None
-        )
+        landmarks_array = None
+        if hand_landmarks:
+            landmarks_array = tracker.landmarks_to_array(hand_landmarks)
+
+        event, payload = segmenter.update(landmarks_array)
 
         if event == "stroke_end":
             seq_landmarks = payload["seq_landmarks"]  # (T,21,3)
-            # convert each frame to normalized flattened vector
+
             feats = []
             for t in range(seq_landmarks.shape[0]):
                 feats.append(normalize_landmarks(seq_landmarks[t]))
+
             feats = np.stack(feats, axis=0)  # (T,63)
 
             feats_rs = resample_sequence(feats, seq_len)  # (seq_len,63)
 
             out_path = os.path.join(device_root, f"sample_{sample_idx:05d}.npy")
             np.save(out_path, feats_rs)
+
             sample_idx += 1
             saved += 1
+
             print(f"Saved {saved}/{args.count}: {out_path}")
 
+        # =========================
         # UI
+        # =========================
         cv2.rectangle(frame, (20, 20), (500, 110), (0, 0, 0), -1)
         cv2.putText(frame, f"Label: {args.label}", (30, 55),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+
         cv2.putText(frame, f"Saved: {saved}/{args.count}", (30, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200,255,200), 2)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 255, 200), 2)
 
         cv2.imshow("AirWrite Recorder (stroke auto-saves)", frame)
+
         key = cv2.waitKey(1) & 0xFF
         if key == 27:  # ESC
             break
+
         if saved >= args.count:
             break
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
